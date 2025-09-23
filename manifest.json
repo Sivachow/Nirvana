@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Nirvana Spotlight",
+  "version": "1.0.0",
+  "description": "Spotlight command box for NirvanaHQ tasks",
+  "permissions": ["scripting", "activeTab", "storage"],
+  "host_permissions": [
+    "https://focus.nirvanahq.com/*",
+    "https://gc-api.nirvanahq.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://focus.nirvanahq.com/*"],
+      "js": [
+        "content/nirvana-api.js",
+        "content/token-manager.js",
+        "content/nirvana-data.js",
+        "content/bridge.js",
+        "content/spotlight.js"
+      ],
+      "css": ["content/spotlight.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.js"],
+      "matches": ["https://focus.nirvanahq.com/*"]
+    }
+  ],
+  "commands": {
+    "open_spotlight": {
+      "suggested_key": { "default": "Ctrl+Shift+K", "mac": "Command+Shift+K" },
+      "description": "Open spotlight chat"
+    }
+  }
+}
