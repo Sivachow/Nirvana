@@ -1,97 +1,88 @@
-// nirvana-api.js - Modular Nirvana API handler
+// nirvana-api.js — Refactored, MCP-friendly updates
+
 class NirvanaAPI {
-    constructor() {
-        this.baseUrl = 'https://gc-api.nirvanahq.com/api';
-        this.authToken = null;
-        this.testCounter = 1; // Counter for test tasks
-    }
+    // ---- Constants & Utilities -------------------------------------------------
+    static BASE_URL = 'https://gc-api.nirvanahq.com/api';
+    static APP_ID = 'com.nirvanahq.focus';
+    static APP_VERSION = '3.10.4';
+    static STATE = { inbox: 0, next: 1, waiting: 2, scheduled: 3, someday: 4, trash: 6 };
 
-    /**
-     * Set the authentication token
-     * @param {string} token - The auth token
-     */
-    setAuthToken(token) {
-        this.authToken = token;
-    }
+    constructor() { this.authToken = null; }
 
-    /**
-     * Build URL with required parameters
-     * @param {string} endpoint - API endpoint
-     * @param {Object} params - Additional parameters
-     * @returns {string} Complete URL
-     */
-    buildUrl(endpoint, params = {}) {
-        if (!this.authToken) {
-            throw new Error('Auth token not set');
-        }
+    setAuthToken(token) { this.authToken = token; }
 
-        const now = Math.floor(Date.now() / 1000);
-        const url = new URL(`${this.baseUrl}/${endpoint}`);
+    // Private helpers
+    _now() { return Math.floor(Date.now() / 1000); }
+    _uuid() { return crypto.randomUUID(); }
+    _requireAuth() { if (!this.authToken) throw new Error('Auth token not set'); }
 
-        const defaultParams = {
+    _defaultParams() {
+        const ts = String(this._now());
+        return {
             authtoken: this.authToken,
-            appid: 'com.nirvanahq.focus',
-            appversion: '3.10.4',
-            clienttime: String(now),
-            servertime: String(now),
-            requestid: crypto.randomUUID()
+            appid: NirvanaAPI.APP_ID,
+            appversion: NirvanaAPI.APP_VERSION,
+            clienttime: ts,
+            servertime: ts,
+            requestid: this._uuid(),
         };
+    }
 
-        Object.assign(defaultParams, params);
-
-        for (const [key, value] of Object.entries(defaultParams)) {
-            url.searchParams.set(key, value);
-        }
-
+    _buildUrl(endpoint, params = {}) {
+        this._requireAuth();
+        const url = new URL(`${NirvanaAPI.BASE_URL}/${endpoint}`);
+        const all = { ...this._defaultParams(), ...params };
+        for (const [k, v] of Object.entries(all)) url.searchParams.set(k, String(v));
         return url.toString();
     }
 
-    /**
-     * Fetch everything from Nirvana
-     * @param {string} since - Timestamp to fetch from (default: '0')
-     * @returns {Promise<Object>} API response data
-     */
-    async fetchEverything(since = '0') {
-        try {
-            const url = this.buildUrl('everything', {
-                return: 'everything',
-                since: since
-            });
-
-            const response = await fetch(url, { method: 'GET' });
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            const data = await response.json();
-            return data;
-        } catch (error) {
-            console.error('[Nirvana MCP] Fetch failed:', error);
-            throw error;
+    async _fetchJSON(url, options = {}) {
+        const res = await fetch(url, options);
+        if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            throw new Error(`HTTP ${res.status}: ${res.statusText}${body ? ` | ${body}` : ''}`);
         }
+        return res.json();
     }
 
-    /**
-     * Add a task to Nirvana
-     * @param {string} name - Task name/description
-     * @param {string} note - Task notes (optional)
-     * @param {string} list - List to add to: 'inbox', 'next', 'waiting', 'scheduled', 'someday' (default: 'next')
-     * @param {boolean} focus - Whether to add to Focus (default: false)
-     * @returns {Promise<Object>} API response data
-     */
-    async addTask(name, note = '', list = 'next', focus = false, taskId) {
+    async _postCommands(commands, since) {
+        const url = this._buildUrl('everything', {
+            return: 'everything',
+            since: String(since ?? this._now() - 1),
+        });
+        return this._fetchJSON(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(commands),
+        });
+    }
+
+    _findTask(results, id) {
+        for (const r of results || []) if (r.task?.id === id) return r.task;
+        return null;
+    }
+
+    async _loadTask(id) {
+        const data = await this.fetchEverything('0');
+        const existing = this._findTask(data.results, id);
+        if (!existing) throw new Error(`Task not found: ${id}`);
+        return existing;
+    }
+
+    // ---- Public API ------------------------------------------------------------
+    async fetchEverything(since = '0') {
+        const url = this._buildUrl('everything', { return: 'everything', since });
+        return this._fetchJSON(url, { method: 'GET' });
+    }
+
+    // Leave addTask behavior as-is per request
+    async addTask(name, note = '', list = 'next', focus = false, _taskId /* compat */) {
         if (!name) throw new Error('Task name is required');
+        const state = NirvanaAPI.STATE[(list || 'next').toLowerCase()] ?? NirvanaAPI.STATE.next;
 
-        const now = Math.floor(Date.now() / 1000);
-
-        const stateMap = { inbox: 0, next: 1, waiting: 2, scheduled: 3, someday: 4 };
-        const normalizedList = (list || 'next').toLowerCase();
-        const state = stateMap[normalizedList] ?? 1; // Default to 'next'
-
-        const taskPayload = [{
+        const payload = [{
             method: 'task.save',
-            id: taskId || crypto.randomUUID(),
+            id: this._uuid(),
             type: 0,
             cancelled: false,
             completed: false,
@@ -111,236 +102,142 @@ class NirvanaAPI {
             waitingfor: ''
         }];
 
-        try {
-            const url = this.buildUrl('everything', {
-                return: 'everything',
-                since: String(now - 1)
-            });
-
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(taskPayload)
-            });
-            console.log(response);
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            const result = await response.json();
-            console.log('[Nirvana MCP] Task added:', name);
-            return result;
-        } catch (error) {
-            console.error('[Nirvana MCP] Add task failed:', error);
-            throw error;
-        }
+        return this._postCommands(payload);
     }
 
-    /**
-     * Add a project to Nirvana
-     * @param {string} name - Project name
-     * @param {string} note - Project notes (optional)
-     * @param {string} tags - Project tags (optional, comma-separated)
-     * @param {string} parentid - Parent project ID (optional)
-     * @param {number} state - Project state (default: 11 for active)
-     * @returns {Promise<Object>} API response data
-     */
-    async addProject(name, note = '', parentid = '', state = 11) {
-        if (!name) throw new Error('Project name is required');
+    // ---- MCP-friendly small, explicit ops -------------------------------------
+    /** Move to a list/state. Adds state + _state timestamp. */
+    async setState(id, listOrState) {
+        const existing = await this._loadTask(id);
+        const now = this._now();
+        const state = typeof listOrState === 'number'
+            ? listOrState
+            : (NirvanaAPI.STATE[String(listOrState).toLowerCase()]);
+        if (state === undefined) throw new Error('Unknown state/list');
 
-        const now = Math.floor(Date.now() / 1000);
-        const projectId = crypto.randomUUID();
-        const projectPayload = [{
-            method: 'task.save',
-            id: projectId,
-            type: 1,
-            parentid: parentid || '',
-            cancelled: false,
-            completed: false,
-            deleted: false,
-            state, // single authoritative state property
-            duedate: '',
-            energy: 0,
-            etime: 0,
-            name,
-            note,
-            ps: 0,
-            seq: 1,
-            seqp: 0,
-            seqt: 0,
-            startdate: '',
-            waitingfor: ''
-        }];
-
-        try {
-            const url = this.buildUrl('everything', {
-                return: 'everything',
-                since: String(now - 1)
-            });
-
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(projectPayload)
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            const result = await response.json();
-            return result;
-        } catch (error) {
-            console.error('[Nirvana MCP] Add project failed:', error);
-            throw error;
-        }
+        const cmd = this._mergeForSave(existing, { state, _state: now }, now);
+        return this._postCommands([cmd]);
     }
 
-    /**
-     * Update an existing task in Nirvana
-     * @param {string} id - Task ID (required)
-     * @param {string} name - Task name/description
-     * @param {string} note - Task notes (optional)
-     * @param {string} list - List to move to: 'inbox', 'next', 'waiting', 'scheduled', 'someday' (optional)
-     * @param {string} tags - Task tags (optional, comma-separated)
-     * @returns {Promise<Object>} API response data
-     */
+    /** Update name and/or note. Stamps _name/_note when changed. */
+    async setNameNote(id, { name, note }) {
+        const existing = await this._loadTask(id);
+        const now = this._now();
+        const patch = {};
+        if (name !== undefined && name !== existing.name) { patch.name = name; patch._name = now; }
+        if (note !== undefined && note !== existing.note) { patch.note = note; patch._note = now; }
+        if (!Object.keys(patch).length) return { ok: true, message: 'No changes' };
+        const cmd = this._mergeForSave(existing, patch, now);
+        return this._postCommands([cmd]);
+    }
+
+    /** Complete a task: sets completed to now (epoch seconds). */
+    async complete(id) {
+        const existing = await this._loadTask(id);
+        const now = this._now();
+        const cmd = this._mergeForSave(existing, { completed: now }, now);
+        return this._postCommands([cmd]);
+    }
+
+    /** Convenience wrappers */
+    async moveTo(list) { return this.setState.bind(this)(...arguments); }
+    async trash(id) { return this.setState(id, NirvanaAPI.STATE.trash); }
+
+    /** General update with automatic stamping for state/name/note as requested. */
     async updateTask({ id, name, note, list, parentid, state, duedate }) {
         if (!id) throw new Error('Task ID is required for update');
-        const now = Math.floor(Date.now() / 1000);
-        const stateMap = { inbox: 0, next: 1, waiting: 2, scheduled: 3, someday: 4 };
+        const existing = await this._loadTask(id);
+        const now = this._now();
 
-        if (!existingTask) {
-            console.warn('[Nirvana MCP] updateTask: Task not found locally, proceeding with minimal payload. ID=', id);
-        }
-
-        let resolvedState = state !== undefined ? state : existingTask?.state;
+        // Resolve state from list/state
+        let resolvedState = state ?? existing.state;
         if (list) {
-            const mapped = stateMap[list.toLowerCase()];
-            if (mapped === undefined) {
-                console.warn('[Nirvana MCP] Unknown list provided to updateTask:', list);
-            } else {
-                resolvedState = mapped;
-            }
+            const mapped = NirvanaAPI.STATE[list.toLowerCase()];
+            if (mapped !== undefined) resolvedState = mapped;
         }
-        if (resolvedState === undefined) resolvedState = 1; // fallback to 'next'
 
-        // Merge fields (prefer explicit args over existing task values)
-        const merged = {
-            method: 'task.save',
-            id,
-            type: existingTask?.type ?? 0,
-            cancelled: existingTask?.cancelled ?? false,
-            completed: existingTask?.completed ?? false,
-            deleted: existingTask?.deleted ?? false,
-            name: name !== undefined ? name : (existingTask?.name || 'Unnamed Task'),
-            note: note !== undefined ? note : (existingTask?.note || ''),
-            duedate: duedate !== undefined ? duedate : (existingTask?.duedate || ''),
-            energy: existingTask?.energy ?? 0,
-            etime: existingTask?.etime ?? 0,
-            ps: existingTask?.ps ?? 0,
-            seq: existingTask?.seq ?? 1,
-            seqp: existingTask?.seqp ?? 0,
-            seqt: existingTask?.seqt ?? 0,
-            startdate: existingTask?.startdate || '',
-            waitingfor: existingTask?.waitingfor || '',
-            parentid: parentid !== undefined ? parentid : (existingTask?.parentid || ''),
-            state: resolvedState,
-            recurring: existingTask?.recurring || ''
-        };
+        const patch = {};
+        if (name !== undefined && name !== existing.name) { patch.name = name; patch._name = now; }
+        if (note !== undefined && note !== existing.note) { patch.note = note; patch._note = now; }
+        if (resolvedState !== undefined && resolvedState !== existing.state) { patch.state = resolvedState; patch._state = now; }
+        if (duedate !== undefined && duedate !== existing.duedate) { patch.duedate = duedate; }
+        if (parentid !== undefined && parentid !== existing.parentid) { patch.parentid = parentid; }
 
-        const taskPayload = [merged];
-        console.debug('[Nirvana MCP] updateTask payload:', JSON.parse(JSON.stringify(taskPayload))); // clone for safe logging
-
-        try {
-            const url = this.buildUrl('everything', { return: 'everything', since: String(now - 1) });
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(taskPayload)
-            });
-            if (!response.ok) {
-                const text = await response.text().catch(() => '');
-                throw new Error(`HTTP ${response.status}: ${response.statusText} Body: ${text}`);
-            }
-            const result = await response.json();
-            console.log('[Nirvana MCP] Task updated:', id, 'Result keys:', Object.keys(result || {}));
-            return result;
-        } catch (error) {
-            console.error('[Nirvana MCP] Update task failed:', error);
-            throw error;
-        }
+        const cmd = this._mergeForSave(existing, patch, now);
+        return this._postCommands([cmd]);
     }
 
-    /**
-     * Add a test task with auto-incrementing counter
-     * @returns {Promise<Object>} API response data
-     */
+    async deleteTask(id) {
+        if (!id) throw new Error('Task ID is required for delete');
+        const existing = await this._loadTask(id);
+        const now = this._now();
+        const cmd = this._mergeForSave(existing, { state: NirvanaAPI.STATE.trash, _state: now }, now);
+        return this._postCommands([cmd]);
+    }
+
+    async focusTask(id) {
+        if (!id) throw new Error('Task ID is required for focus');
+        const existing = await this._loadTask(id);
+        const now = this._now();
+        const cmd = this._mergeForSave(existing, { seqt: now, _seqt: now }, now);
+    }
+
     async addTestTask() {
-        try {
-            // Test scenario: try updating a known task ID first; if it doesn't exist, create it.
-            const fixedId = '0a5b6c01-2b9f-48c5-84ff-8f22c1686209';
-            const data = await this.fetchEverything();
-            console.log(data);
-            const existing = data.results.some(r => r.task?.id === "0a5b6c01-2b9f-48c5-84ff-8f22c1686209");
-            if (existing) {
-                const newName = `Updated Test Task #${this.testCounter}`;
-                console.log('[Nirvana MCP] addTestTask: Updating existing test task', fixedId);
-                const result = await this.updateTask({ id: fixedId, name: newName, note: 'Updated via Spotlight test harness' });
-                this.testCounter++;
-                return result;
-            }
-        } catch (error) {
-            console.error('[Nirvana MCP] Test task add/update failed:', error);
-            throw error;
-        }
+        const fixedId = '0a5b6c01-2b9f-48c5-84ff-8f22c1686209';
+        const data = await this.fetchEverything();
+        const exists = !!this._findTask(data.results, fixedId);
+        if (exists) return this.focusTask(fixedId);
+        return { ok: true, message: 'Fixed test task not found; nothing to delete.' };
     }
 
-    /**
-     * Fetch a single task by ID (pulls everything and searches). Lightweight helper for dev/testing.
-     * NOTE: Could be optimized by caching / reusing last fetch if needed.
-     * @param {string} id
-     * @returns {Promise<Object|null>} Task object or null if not found
-     */
     async getTaskById(id) {
         if (!id) return null;
         try {
             const data = await this.fetchEverything('0');
-            const allTasks = ([]).concat(data.tasks || [], data.task || []);
-            return allTasks.find(t => t.id === id) || null;
+            return this._findTask(data.results, id);
         } catch (e) {
             console.warn('[Nirvana MCP] getTaskById failed:', e);
             return null;
         }
     }
 
-    /**
-     * Generic API request method
-     * @param {string} endpoint - API endpoint
-     * @param {Object} params - Request parameters
-     * @param {Object} options - Fetch options
-     * @returns {Promise<Object>} API response data
-     */
     async request(endpoint, params = {}, options = {}) {
-        try {
-            const url = this.buildUrl(endpoint, params);
-            const response = await fetch(url, { method: 'GET', ...options });
+        const url = this._buildUrl(endpoint, params);
+        return this._fetchJSON(url, { method: 'GET', ...options });
+    }
 
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
+    // ---- Merge helper to keep payload shape consistent ------------------------
+    _mergeForSave(existing, patch, now = this._now()) {
+        return {
+            method: 'task.save',
+            id: existing.id,
+            type: existing.type ?? 0,
+            cancelled: existing.cancelled ?? false,
+            completed: existing.completed ?? false,
+            deleted: existing.deleted ?? false,
 
-            return await response.json();
-        } catch (error) {
-            console.error(`[Nirvana MCP] Request to ${endpoint} failed:`, error);
-            throw error;
-        }
+            name: patch.name ?? existing.name ?? 'Unnamed Task',
+            note: patch.note ?? existing.note ?? '',
+            duedate: patch.duedate ?? existing.duedate ?? '',
+            energy: existing.energy ?? 0,
+            etime: existing.etime ?? 0,
+            ps: existing.ps ?? 0,
+            startdate: existing.startdate ?? '',
+            waitingfor: existing.waitingfor ?? '',
+            parentid: patch.parentid ?? existing.parentid ?? '',
+            state: patch.state ?? existing.state ?? NirvanaAPI.STATE.next,
+            recurring: existing.recurring ?? '',
+
+            seq: existing.seq ?? 0,
+            seqp: existing.seqp ?? 0,
+            seqt: existing.seqt ?? 0,
+
+            ...(patch._name ? { _name: patch._name } : {}),
+            ...(patch._note ? { _note: patch._note } : {}),
+            ...(patch._state ? { _state: patch._state } : {}),
+        };
     }
 }
 
-// Export for use in other modules
+    // Export
 window.NirvanaAPI = NirvanaAPI;

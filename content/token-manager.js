@@ -117,9 +117,10 @@ class TokenManager {
   async fetchData(since = '0') {
     try {
       const data = await this.api.fetchEverything(since);
+      const tasks = data.results.filter(r => r.task && r.task.deleted === "0");
 
       // Dispatch custom event with the data
-      const event = new CustomEvent('nirvanadata', { detail: data });
+      const event = new CustomEvent('nirvanadata', { detail: tasks });
       document.dispatchEvent(event);
       
       return data;
