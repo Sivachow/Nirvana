@@ -1,6 +1,6 @@
 if (!window.__nirvanaSpotlight) {
 
-let spotlight, input;
+let spotlight, input, responseDiv, aiHandler, conversationHistory = [];
 
 function create() {
     if (spotlight) return;
@@ -8,8 +8,9 @@ function create() {
     spotlight = Object.assign(document.createElement("div"), {
         id: "nirvana-spotlight",
         innerHTML: `<div class="card">
-            <input id="nirvana-spotlight-input" type="text" placeholder="Type anything and press Enter to create test task…">
-            <div class="hint">Press Esc to close • Enter creates numbered test task in Next</div>
+            <div id="nirvana-spotlight-response" class="response"></div>
+            <input id="nirvana-spotlight-input" type="text" placeholder="Ask me anything... (e.g., 'Add buy groceries to my next list')">
+            <div class="hint">Press Esc to close • Enter to send • Powered by AI</div>
         </div>`
     });
     spotlight.setAttribute("aria-modal", "true");
@@ -17,37 +18,103 @@ function create() {
     document.documentElement.appendChild(spotlight);
     
     input = spotlight.querySelector("#nirvana-spotlight-input");
+    responseDiv = spotlight.querySelector("#nirvana-spotlight-response");
+    
+    // Initialize AI handler
+    const tokenManager = window.__nirvanaTokenManager;
+    if (tokenManager && tokenManager.api) {
+        aiHandler = new AIHandler(tokenManager.api);
+    }
+    
     input.addEventListener("keydown", async (e) => {
-        if (e.key === "Escape" || e.key === "Enter") {
-            if (e.key === "Enter") {
-                e.preventDefault();
-                const inputText = input.value.trim();
-                console.log("[Spotlight]", inputText);
-                
-                // Call test API when user types anything
-                if (inputText) {
-                    await callTestAPI();
-                }
-            }
+        if (e.key === "Escape") {
             toggle(false);
+        } else if (e.key === "Enter") {
+            e.preventDefault();
+            const inputText = input.value.trim();
+            
+            if (!inputText) return;
+            
+            // Handle special commands
+            if (inputText === '/clear') {
+                conversationHistory = [];
+                showResponse('Conversation cleared!', 'success');
+                input.value = '';
+                setTimeout(() => hideResponse(), 1500);
+                return;
+            }
+            
+            if (inputText.startsWith('/setkey ')) {
+                const key = inputText.substring(8).trim();
+                if (aiHandler) {
+                    await aiHandler.setAPIKey(key);
+                    showResponse('API key saved!', 'success');
+                    input.value = '';
+                    setTimeout(() => hideResponse(), 1500);
+                }
+                return;
+            }
+            
+            // Process with AI
+            await processWithAI(inputText);
         }
     });
 }
 
-async function callTestAPI() {
-    try {
-        const tokenManager = window.__nirvanaTokenManager;
-        if (!tokenManager || !tokenManager.api) {
-            console.error('[Spotlight] Token manager or API not available');
-            return;
-        }
-
-        console.log('[Spotlight] Creating test task...');
-        const result = await tokenManager.api.addTestTask();
-        console.log('[Spotlight] Test task created successfully:', result);
-    } catch (error) {
-        console.error('[Spotlight] Failed to create test task:', error);
+async function processWithAI(userInput) {
+    if (!aiHandler) {
+        showResponse('AI handler not initialized. Please refresh the page.', 'error');
+        return;
     }
+    
+    try {
+        // Show loading state
+        showResponse('Thinking...', 'loading');
+        input.disabled = true;
+        
+        // Process with AI
+        const result = await aiHandler.processInput(userInput, conversationHistory);
+        
+        // Update conversation history
+        conversationHistory.push(
+            { role: 'user', content: userInput },
+            { role: 'assistant', content: result.response }
+        );
+        
+        // Show response
+        showResponse(result.response, 'success');
+        
+        // Clear input
+        input.value = '';
+        
+        // Auto-hide after 3 seconds if it's a simple confirmation
+        if (result.functionCalled) {
+            setTimeout(() => {
+                hideResponse();
+                toggle(false);
+            }, 3000);
+        }
+        
+    } catch (error) {
+        console.error('[Spotlight] AI processing failed:', error);
+        showResponse(error.message || 'Failed to process request', 'error');
+    } finally {
+        input.disabled = false;
+        input.focus();
+    }
+}
+
+function showResponse(text, type = 'info') {
+    if (!responseDiv) return;
+    
+    responseDiv.textContent = text;
+    responseDiv.className = `response ${type}`;
+    responseDiv.style.display = 'block';
+}
+
+function hideResponse() {
+    if (!responseDiv) return;
+    responseDiv.style.display = 'none';
 }
 
 function toggle(show) {
@@ -58,7 +125,10 @@ function toggle(show) {
     spotlight.style.display = show ? "flex" : "none";
     document.body.style.overflow = show ? "hidden" : "";
     
-    if (show) setTimeout(() => input?.focus(), 0);
+    if (show) {
+        hideResponse();
+        setTimeout(() => input?.focus(), 0);
+    }
 }
 
 document.addEventListener("click", (e) => {
@@ -68,3 +138,4 @@ document.addEventListener("click", (e) => {
 window.__nirvanaSpotlight = { toggle };
 
 }
+

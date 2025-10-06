@@ -4,9 +4,11 @@
   "version": "1.0.0",
   "description": "Spotlight command box for NirvanaHQ tasks",
   "permissions": ["scripting", "activeTab", "storage"],
+  "options_page": "options.html",
   "host_permissions": [
     "https://focus.nirvanahq.com/*",
-    "https://gc-api.nirvanahq.com/*"
+    "https://gc-api.nirvanahq.com/*",
+    "https://api.openai.com/*"
   ],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
@@ -16,6 +18,7 @@
         "content/nirvana-api.js",
         "content/token-manager.js",
         "content/nirvana-data.js",
+        "content/ai-handler.js",
         "content/bridge.js",
         "content/spotlight.js"
       ],

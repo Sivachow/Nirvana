@@ -1,14 +1,38 @@
-# Nirvana MCP Extension
+# Nirvana AI Extension
 
-A Chrome extension that captures Nirvana auth tokens and provides API access to Nirvana task data.
+A Chrome extension that brings AI-powered natural language control to Nirvana task management. Simply open the spotlight with `Cmd+Shift+K` and tell the AI what you want to do.
 
 ## Features
 
-- **Token Interception**: Automatically captures auth tokens from Nirvana API calls
-- **Data Caching**: Efficient caching system with 5-minute timeout
-- **Modular Architecture**: Clean separation of concerns with dedicated modules
-- **Spotlight Integration**: Enhanced spotlight with task search capabilities
-- **Storage Management**: Persistent token storage using Chrome storage API
+- **🤖 AI-Powered Commands**: Use natural language to manage tasks
+- **⚡ Quick Spotlight**: Fast keyboard access with `Cmd+Shift+K`
+- **🔐 Token Interception**: Automatically captures auth tokens from Nirvana API calls
+- **💾 Data Caching**: Efficient caching system with 5-minute timeout
+- **🏗️ Modular Architecture**: Clean separation of concerns with dedicated modules
+- **🔍 Smart Search**: AI understands context and finds the right tasks
+
+## Quick Start
+
+### 1. Installation
+1. Clone this repository
+2. Open Chrome and go to `chrome://extensions/`
+3. Enable "Developer mode"
+4. Click "Load unpacked" and select the extension folder
+
+### 2. Setup
+1. Navigate to [Nirvana](https://focus.nirvanahq.com/)
+2. Right-click the extension icon → Options
+3. Enter your OpenAI API key (get one from [OpenAI Platform](https://platform.openai.com/api-keys))
+4. Click Save
+
+### 3. Usage
+1. Press `Cmd+Shift+K` (or `Ctrl+Shift+K` on Windows/Linux) anywhere on Nirvana
+2. Type natural commands like:
+   - "Add buy groceries to my next list"
+   - "Find all tasks about the project"
+   - "Mark task about meeting as complete"
+   - "Move the groceries task to someday"
+   - "Delete the old task about shopping"
 
 ## Architecture
 
@@ -18,7 +42,8 @@ A Chrome extension that captures Nirvana auth tokens and provides API access to 
 2. **nirvana-api.js**: API client class for making authenticated requests to Nirvana
 3. **token-manager.js**: Handles token capture, storage, and initial data fetching
 4. **nirvana-data.js**: Data management with caching and basic query utilities
-5. **spotlight.js**: Minimal UI for creating quick test tasks
+5. **ai-handler.js**: AI integration using OpenAI's function calling
+6. **spotlight.js**: UI for natural language input and responses
 
 ### File Structure
 
@@ -26,28 +51,48 @@ A Chrome extension that captures Nirvana auth tokens and provides API access to 
 ├── manifest.json          # Extension manifest with permissions
 ├── background.js          # Service worker for extension commands
 ├── inject.js             # Token interceptor (runs in page context)
+├── options.html          # Settings page
+├── options.js            # Settings page logic
 └── content/
     ├── nirvana-api.js    # API client module
     ├── token-manager.js  # Token management
     ├── nirvana-data.js   # Data utilities (cache/search)
+    ├── ai-handler.js     # AI integration
     ├── bridge.js         # Extension bridge
     ├── spotlight.js      # Enhanced UI
     └── spotlight.css     # Styling
 ```
 
-## Usage
+## AI Integration
 
-### Basic Setup
+The extension uses OpenAI's function calling feature to intelligently route user commands to the appropriate Nirvana API functions.
 
-1. The extension automatically injects the token interceptor when loaded
-2. Navigate to Nirvana and perform any action that triggers an API call
-3. The token will be captured and stored automatically
-4. Data will be fetched and cached for quick access
+### Available AI Functions
+
+- **add_task**: Create new tasks with name, note, and list
+- **update_task**: Modify existing tasks
+- **complete_task**: Mark tasks as done
+- **delete_task**: Move tasks to trash
+- **search_tasks**: Find tasks by keywords
+- **list_tasks**: Show all tasks in a specific list
+
+### Example Commands
+
+```
+"Add buy milk to next"
+"Create a task called call John with note discuss project timeline"
+"Find tasks about groceries"
+"Complete the task about emails"
+"Move the meeting task to scheduled"
+"Show me all my next tasks"
+"Delete the old project task"
+```
 
 ### Spotlight Commands
 
-- **Open Spotlight**: `Ctrl+Shift+K` (or `Cmd+Shift+K` on Mac)
-- **Refresh Data**: Type `/refresh` and press Enter
+- **Open Spotlight**: `Cmd+Shift+K` (or `Ctrl+Shift+K` on Windows/Linux)
+- **Set API Key**: Type `/setkey YOUR_API_KEY` in spotlight
+- **Clear Conversation**: Type `/clear` to reset conversation history
 - (Search UI not yet implemented; data manager offers programmatic search helpers)
 
 ### Programmatic Access
